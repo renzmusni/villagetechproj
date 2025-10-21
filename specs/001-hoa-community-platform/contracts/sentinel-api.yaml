@@ -1,0 +1,956 @@
+openapi: 3.0.3
+info:
+  title: HOA Sentinel API
+  description: Security gate operations API for real-time access control and monitoring
+  version: 1.0.0
+  contact:
+    name: VillageTech Support
+    email: support@villagetech.com
+
+servers:
+  - url: https://api.villagetech.com/sentinel/v1
+    description: Production server
+
+security:
+  - BearerAuth: []
+
+paths:
+  /gates:
+    get:
+      summary: List accessible gates
+      tags:
+        - Gate Operations
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of gates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Gate'
+
+  /gates/{gateId}/status:
+    get:
+      summary: Get gate status
+      tags:
+        - Gate Operations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: gateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Gate status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/GateStatus'
+
+  /access/scan:
+    post:
+      summary: Process gate access request
+      tags:
+        - Access Control
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessScanRequest'
+      responses:
+        '200':
+          description: Access processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    enum: [granted, denied]
+                  reason:
+                    type: string
+                  entity:
+                    oneOf:
+                      - $ref: '#/components/schemas/User'
+                      - $ref: '#/components/schemas/Vehicle'
+                      - $ref: '#/components/schemas/Guest'
+                      - $ref: '#/components/schemas/ConstructionWorker'
+                  access_type:
+                    type: string
+                    enum: [entry, exit]
+                  timestamp:
+                    type: string
+                    format: date-time
+        '400':
+          description: Invalid scan data
+        '404':
+          description: Entity not found
+
+  /access/validate:
+    post:
+      summary: Validate access without scanning
+      tags:
+        - Access Control
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessValidateRequest'
+      responses:
+        '200':
+          description: Access validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  entity:
+                    oneOf:
+                      - $ref: '#/components/schemas/User'
+                      - $ref: '#/components/schemas/Vehicle'
+                      - $ref: '#/components/schemas/Guest'
+                      - $ref: '#/components/schemas/ConstructionWorker'
+                  restrictions:
+                    type: array
+                    items:
+                      type: string
+
+  /guests/verify:
+    post:
+      summary: Verify guest access
+      tags:
+        - Guest Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyGuestRequest'
+      responses:
+        '200':
+          description: Guest verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  guest:
+                    $ref: '#/components/schemas/Guest'
+                  household:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      address:
+                        type: string
+                  access_permissions:
+                    type: object
+                    properties:
+                      valid_from:
+                        type: string
+                        format: date-time
+                      valid_to:
+                        type: string
+                        format: date-time
+                      vehicle_access:
+                        type: boolean
+
+  /workers/verify:
+    post:
+      summary: Verify construction worker access
+      tags:
+        - Construction Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyWorkerRequest'
+      responses:
+        '200':
+          description: Worker verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  worker:
+                    $ref: '#/components/schemas/ConstructionWorker'
+                  permit:
+                    $ref: '#/components/schemas/ConstructionPermit'
+                  residence:
+                    type: object
+                    properties:
+                      address:
+                        type: string
+                      unit_number:
+                        type: string
+                  access_permissions:
+                    type: object
+                    properties:
+                      valid_from:
+                        type: string
+                        format: date-time
+                      valid_to:
+                        type: string
+                        format: date-time
+
+  /deliveries:
+    get:
+      summary: List expected deliveries
+      tags:
+        - Delivery Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, arrived, completed]
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: List of deliveries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Delivery'
+    post:
+      summary: Record delivery arrival
+      tags:
+        - Delivery Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordDeliveryRequest'
+      responses:
+        '201':
+          description: Delivery recorded
+        '400':
+          description: Invalid delivery data
+
+  /deliveries/{deliveryId}/complete:
+    post:
+      summary: Complete delivery
+      tags:
+        - Delivery Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: deliveryId
+          in: path
+          required: true
+          schema:
+            type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                recipient_name:
+                  type: string
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Delivery completed
+        '404':
+          description: Delivery not found
+
+  /logs/access:
+    get:
+      summary: Get access logs
+      tags:
+        - Monitoring
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: gateId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: result
+          in: query
+          schema:
+            type: string
+            enum: [granted, denied, error]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Access logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AccessLog'
+
+  /incidents:
+    get:
+      summary: List security incidents
+      tags:
+        - Incident Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, resolved, closed]
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+      responses:
+        '200':
+          description: List of incidents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Incident'
+    post:
+      summary: Report security incident
+      tags:
+        - Incident Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIncidentRequest'
+      responses:
+        '201':
+          description: Incident reported
+        '400':
+          description: Invalid incident data
+
+  /incidents/{incidentId}/resolve:
+    post:
+      summary: Resolve incident
+      tags:
+        - Incident Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resolution:
+                  type: string
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Incident resolved
+        '404':
+          description: Incident not found
+
+  /profile:
+    get:
+      summary: Get security officer profile
+      tags:
+        - User Management
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Security officer profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SecurityOfficer'
+
+components:
+  schemas:
+    Gate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        location:
+          type: string
+        type:
+          type: string
+          enum: [vehicle, pedestrian, mixed]
+        status:
+          type: string
+          enum: [active, inactive, maintenance]
+        operating_hours:
+          type: object
+        access_rules:
+          type: object
+
+    GateStatus:
+      type: object
+      properties:
+        gate_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [active, inactive, maintenance]
+        current_mode:
+          type: string
+          enum: [auto, manual, locked]
+        last_activity:
+          type: string
+          format: date-time
+        active_sessions:
+          type: integer
+        system_health:
+          type: object
+          properties:
+            scanner_status:
+              type: string
+              enum: [online, offline, error]
+            network_status:
+              type: string
+              enum: [online, offline, error]
+            last_heartbeat:
+              type: string
+              format: date-time
+
+    AccessScanRequest:
+      type: object
+      required:
+        - gate_id
+        - scan_type
+        - scan_data
+      properties:
+        gate_id:
+          type: string
+          format: uuid
+        scan_type:
+          type: string
+          enum: [qr_code, barcode, license_plate, nfc, manual]
+        scan_data:
+          type: string
+        access_type:
+          type: string
+          enum: [entry, exit]
+          default: entry
+        timestamp:
+          type: string
+          format: date-time
+        additional_info:
+          type: object
+          properties:
+            vehicle_make:
+              type: string
+            vehicle_color:
+              type: string
+            physical_description:
+              type: string
+
+    AccessValidateRequest:
+      type: object
+      required:
+        - validation_type
+        - identifier
+      properties:
+        validation_type:
+          type: string
+          enum: [email, phone, pass_number, license_plate, guest_code, worker_code]
+        identifier:
+          type: string
+        gate_id:
+          type: string
+          format: uuid
+        access_type:
+          type: string
+          enum: [entry, exit]
+
+    VerifyGuestRequest:
+      type: object
+      required:
+        - identifier
+      properties:
+        identifier:
+          type: string
+        verification_type:
+          type: string
+          enum: [name, phone, guest_code, household_address]
+        gate_id:
+          type: string
+          format: uuid
+
+    VerifyWorkerRequest:
+      type: object
+      required:
+        - identifier
+      properties:
+        identifier:
+          type: string
+        verification_type:
+          type: string
+          enum: [name, phone, worker_code, company, permit_number]
+        gate_id:
+          type: string
+          format: uuid
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [household-head, household-member, household-beneficial-user, security-head, security-officer]
+        household:
+          type: object
+          properties:
+            name:
+              type: string
+            address:
+              type: string
+
+    Vehicle:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        make:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        color:
+          type: string
+        license_plate:
+          type: string
+        household:
+          type: object
+          properties:
+            name:
+              type: string
+            address:
+              type: string
+        gate_passes:
+          type: array
+          items:
+            type: object
+            properties:
+              pass_number:
+                type: string
+              valid_from:
+                type: string
+                format: date
+              valid_to:
+                type: string
+                format: date
+              status:
+                type: string
+
+    Guest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+        last_name:
+          type: string
+        visit_type:
+          type: string
+          enum: [day_trip, multi_day]
+        visit_date_start:
+          type: string
+          format: date-time
+        visit_date_end:
+          type: string
+          format: date-time
+        purpose:
+          type: string
+        vehicle_info:
+          type: object
+        household:
+          type: object
+          properties:
+            name:
+              type: string
+            address:
+              type: string
+        status:
+          type: string
+          enum: [scheduled, checked_in, checked_out, cancelled]
+
+    ConstructionWorker:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+        last_name:
+          type: string
+        company:
+          type: string
+        phone:
+          type: string
+        permit:
+          type: object
+          properties:
+            project_title:
+              type: string
+            contractor_name:
+              type: string
+        residence:
+          type: object
+          properties:
+            address:
+              type: string
+            unit_number:
+              type: string
+        pass_type:
+          type: string
+          enum: [daily, weekly, project_duration]
+        valid_from:
+          type: string
+          format: date-time
+        valid_to:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, expired, revoked]
+
+    ConstructionPermit:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_title:
+          type: string
+        contractor_name:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [approved, completed, cancelled]
+
+    Delivery:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        delivery_company:
+          type: string
+        tracking_number:
+          type: string
+        recipient_household:
+          type: object
+          properties:
+            name:
+              type: string
+            address:
+              type: string
+        expected_arrival:
+          type: string
+          format: date-time
+        actual_arrival:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          enum: [pending, arrived, completed]
+        delivery_type:
+          type: string
+          enum: [package, food, mail, freight, other]
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    RecordDeliveryRequest:
+      type: object
+      required:
+        - delivery_company
+        - recipient_household_id
+        - delivery_type
+      properties:
+        delivery_company:
+          type: string
+        tracking_number:
+          type: string
+        recipient_household_id:
+          type: string
+          format: uuid
+        delivery_type:
+          type: string
+          enum: [package, food, mail, freight, other]
+        notes:
+          type: string
+
+    AccessLog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        gate_id:
+          type: string
+          format: uuid
+        entity_type:
+          type: string
+          enum: [user, vehicle, guest, worker]
+        entity_id:
+          type: string
+          format: uuid
+        entity_name:
+          type: string
+        access_type:
+          type: string
+          enum: [entry, exit]
+        result:
+          type: string
+          enum: [granted, denied, error]
+        reason:
+          type: string
+        scanned_by:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        additional_data:
+          type: object
+
+    Incident:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        status:
+          type: string
+          enum: [open, resolved, closed]
+        incident_type:
+          type: string
+          enum: [unauthorized_access, suspicious_activity, safety_violation, equipment_malfunction, other]
+        gate_id:
+          type: string
+          format: uuid
+          nullable: true
+        reported_by:
+          type: string
+          format: uuid
+        occurred_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    CreateIncidentRequest:
+      type: object
+      required:
+        - title
+        - description
+        - severity
+        - incident_type
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        incident_type:
+          type: string
+          enum: [unauthorized_access, suspicious_activity, safety_violation, equipment_malfunction, other]
+        gate_id:
+          type: string
+          format: uuid
+        occurred_at:
+          type: string
+          format: date-time
+        involved_parties:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              role:
+                type: string
+              contact:
+                type: string
+
+    SecurityOfficer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        employee_id:
+          type: string
+        role:
+          type: string
+          enum: [security-head, security-officer]
+        assigned_gates:
+          type: array
+          items:
+            type: object
+            properties:
+              gate_id:
+                type: string
+                format: uuid
+              gate_name:
+                type: string
+              primary:
+                type: boolean
+        certifications:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              expiration_date:
+                type: string
+                format: date
+        last_login:
+          type: string
+          format: date-time
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

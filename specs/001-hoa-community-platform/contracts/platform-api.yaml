@@ -1,0 +1,425 @@
+openapi: 3.0.3
+info:
+  title: HOA Platform API
+  description: Platform administration API for managing residential communities
+  version: 1.0.0
+  contact:
+    name: VillageTech Support
+    email: support@villagetech.com
+
+servers:
+  - url: https://api.villagetech.com/platform/v1
+    description: Production server
+
+security:
+  - BearerAuth: []
+
+paths:
+  /tenants:
+    get:
+      summary: List all residential communities
+      tags:
+        - Tenant Management
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of tenants
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tenant'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+    post:
+      summary: Create new residential community
+      tags:
+        - Tenant Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTenantRequest'
+      responses:
+        '201':
+          description: Tenant created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tenant'
+                  message:
+                    type: string
+        '400':
+          description: Invalid request data
+        '409':
+          description: Tenant already exists
+
+  /tenants/{tenantId}:
+    get:
+      summary: Get tenant details
+      tags:
+        - Tenant Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Tenant details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tenant'
+        '404':
+          description: Tenant not found
+    put:
+      summary: Update tenant details
+      tags:
+        - Tenant Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTenantRequest'
+      responses:
+        '200':
+          description: Tenant updated successfully
+        '404':
+          description: Tenant not found
+    delete:
+      summary: Delete tenant
+      tags:
+        - Tenant Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Tenant deleted successfully
+        '404':
+          description: Tenant not found
+
+  /tenants/{tenantId}/users:
+    post:
+      summary: Create initial tenant admin users
+      tags:
+        - User Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTenantUserRequest'
+      responses:
+        '201':
+          description: User created successfully
+        '400':
+          description: Invalid request data
+        '404':
+          description: Tenant not found
+
+  /tenants/{tenantId}/gates:
+    get:
+      summary: List tenant gates
+      tags:
+        - Gate Configuration
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of gates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Gate'
+    post:
+      summary: Create gate for tenant
+      tags:
+        - Gate Configuration
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGateRequest'
+      responses:
+        '201':
+          description: Gate created successfully
+        '400':
+          description: Invalid request data
+        '404':
+          description: Tenant not found
+
+  /analytics:
+    get:
+      summary: Get platform analytics
+      tags:
+        - Analytics
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: metric
+          in: query
+          schema:
+            type: string
+            enum: [tenants, users, households, vehicles, gate_passes, construction_permits]
+      responses:
+        '200':
+          description: Analytics data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AnalyticsData'
+
+components:
+  schemas:
+    Tenant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        address:
+          type: string
+        contact_email:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+        settings:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateTenantRequest:
+      type: object
+      required:
+        - name
+        - address
+        - contact_email
+        - admin_user
+      properties:
+        name:
+          type: string
+        address:
+          type: string
+        contact_email:
+          type: string
+          format: email
+        settings:
+          type: object
+        admin_user:
+          $ref: '#/components/schemas/CreateTenantUserRequest'
+
+    UpdateTenantRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        address:
+          type: string
+        contact_email:
+          type: string
+          format: email
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+        settings:
+          type: object
+
+    CreateTenantUserRequest:
+      type: object
+      required:
+        - email
+        - first_name
+        - last_name
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [admin-head, admin-officer, security-head]
+
+    Gate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        location:
+          type: string
+        type:
+          type: string
+          enum: [vehicle, pedestrian, mixed]
+        status:
+          type: string
+          enum: [active, inactive, maintenance]
+        operating_hours:
+          type: object
+        access_rules:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+
+    CreateGateRequest:
+      type: object
+      required:
+        - name
+        - type
+        - location
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        location:
+          type: string
+        type:
+          type: string
+          enum: [vehicle, pedestrian, mixed]
+        operating_hours:
+          type: object
+        access_rules:
+          type: object
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        pages:
+          type: integer
+
+    AnalyticsData:
+      type: object
+      properties:
+        metric:
+          type: string
+        period:
+          type: object
+          properties:
+            start:
+              type: string
+              format: date
+            end:
+              type: string
+              format: date
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              value:
+                type: number
+              breakdown:
+                type: object
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

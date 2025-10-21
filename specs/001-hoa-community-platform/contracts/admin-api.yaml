@@ -1,0 +1,974 @@
+openapi: 3.0.3
+info:
+  title: HOA Admin API
+  description: HOA administration API for managing residents, permits, and community operations
+  version: 1.0.0
+  contact:
+    name: VillageTech Support
+    email: support@villagetech.com
+
+servers:
+  - url: https://api.villagetech.com/admin/v1
+    description: Production server
+
+security:
+  - BearerAuth: []
+
+paths:
+  /households:
+    get:
+      summary: List households
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive]
+      responses:
+        '200':
+          description: List of households
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Household'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+    post:
+      summary: Create new household
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateHouseholdRequest'
+      responses:
+        '201':
+          description: Household created successfully
+        '400':
+          description: Invalid request data
+        '409':
+          description: Household already exists
+
+  /households/{householdId}:
+    get:
+      summary: Get household details
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Household details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/HouseholdDetail'
+        '404':
+          description: Household not found
+    put:
+      summary: Update household details
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateHouseholdRequest'
+      responses:
+        '200':
+          description: Household updated successfully
+        '404':
+          description: Household not found
+
+  /households/{householdId}/members:
+    get:
+      summary: List household members
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of household members
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+    post:
+      summary: Add household member
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: Member added successfully
+        '400':
+          description: Invalid request data
+
+  /households/{householdId}/residences:
+    get:
+      summary: List household residences
+      tags:
+        - Residence Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of residences
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Residence'
+    post:
+      summary: Add residence to household
+      tags:
+        - Residence Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: householdId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateResidenceRequest'
+      responses:
+        '201':
+          description: Residence added successfully
+
+  /gate-passes:
+    get:
+      summary: List gate pass requests
+      tags:
+        - Gate Pass Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, rejected, expired, revoked]
+        - name: householdId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of gate pass requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GatePass'
+
+  /gate-passes/{passId}/approve:
+    post:
+      summary: Approve gate pass request
+      tags:
+        - Gate Pass Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: passId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                valid_from:
+                  type: string
+                  format: date
+                valid_to:
+                  type: string
+                  format: date
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Gate pass approved
+        '404':
+          description: Gate pass not found
+        '409':
+          description: Gate pass already processed
+
+  /gate-passes/{passId}/reject:
+    post:
+      summary: Reject gate pass request
+      tags:
+        - Gate Pass Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: passId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Gate pass rejected
+        '404':
+          description: Gate pass not found
+
+  /construction-permits:
+    get:
+      summary: List construction permit applications
+      tags:
+        - Construction Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, rejected, completed, cancelled]
+        - name: householdId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of construction permits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConstructionPermit'
+
+  /construction-permits/{permitId}/approve:
+    post:
+      summary: Approve construction permit
+      tags:
+        - Construction Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: permitId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approved_conditions:
+                  type: string
+                inspection_required:
+                  type: boolean
+      responses:
+        '200':
+          description: Permit approved
+        '404':
+          description: Permit not found
+
+  /construction-permits/{permitId}/reject:
+    post:
+      summary: Reject construction permit
+      tags:
+        - Construction Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: permitId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Permit rejected
+        '404':
+          description: Permit not found
+
+  /announcements:
+    get:
+      summary: List announcements
+      tags:
+        - Communications
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, scheduled, sent, cancelled]
+      responses:
+        '200':
+          description: List of announcements
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Announcement'
+    post:
+      summary: Create announcement
+      tags:
+        - Communications
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAnnouncementRequest'
+      responses:
+        '201':
+          description: Announcement created
+
+  /announcements/{announcementId}/send:
+    post:
+      summary: Send announcement
+      tags:
+        - Communications
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: announcementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Announcement sent
+        '404':
+          description: Announcement not found
+
+  /elections:
+    get:
+      summary: List elections
+      tags:
+        - Election Management
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of elections
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Election'
+    post:
+      summary: Create new election
+      tags:
+        - Election Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateElectionRequest'
+      responses:
+        '201':
+          description: Election created
+
+  /elections/{electionId}/start:
+    post:
+      summary: Start election phase
+      tags:
+        - Election Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: electionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [nomination, voting]
+      responses:
+        '200':
+          description: Election phase started
+        '404':
+          description: Election not found
+
+components:
+  schemas:
+    Household:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        primary_contact:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+        created_at:
+          type: string
+          format: date-time
+
+    HouseholdDetail:
+      allOf:
+        - $ref: '#/components/schemas/Household'
+        - type: object
+          properties:
+            residences:
+              type: array
+              items:
+                $ref: '#/components/schemas/Residence'
+            members:
+              type: array
+              items:
+                $ref: '#/components/schemas/User'
+            vehicles:
+              type: array
+              items:
+                $ref: '#/components/schemas/Vehicle'
+
+    CreateHouseholdRequest:
+      type: object
+      required:
+        - name
+        - primary_contact
+        - email
+        - residence
+        - household_head
+      properties:
+        name:
+          type: string
+        primary_contact:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        residence:
+          $ref: '#/components/schemas/CreateResidenceRequest'
+        household_head:
+          $ref: '#/components/schemas/CreateUserRequest'
+
+    UpdateHouseholdRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        primary_contact:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+
+    Residence:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        household_id:
+          type: string
+          format: uuid
+        address:
+          type: string
+        unit_number:
+          type: string
+        type:
+          type: string
+          enum: [house, apartment, condo, townhouse]
+        square_footage:
+          type: integer
+        bedrooms:
+          type: integer
+        bathrooms:
+          type: integer
+        status:
+          type: string
+          enum: [occupied, vacant, under_construction]
+
+    CreateResidenceRequest:
+      type: object
+      required:
+        - address
+        - type
+      properties:
+        address:
+          type: string
+        unit_number:
+          type: string
+        type:
+          type: string
+          enum: [house, apartment, condo, townhouse]
+        square_footage:
+          type: integer
+        bedrooms:
+          type: integer
+        bathrooms:
+          type: integer
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        household_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [admin-head, admin-officer, household-head, household-member, household-beneficial-user, security-head, security-officer]
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+        created_at:
+          type: string
+          format: date-time
+
+    CreateUserRequest:
+      type: object
+      required:
+        - email
+        - first_name
+        - last_name
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [household-head, household-member, household-beneficial-user, security-officer]
+
+    Vehicle:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        household_id:
+          type: string
+          format: uuid
+        make:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        color:
+          type: string
+        license_plate:
+          type: string
+        registration_expiry:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [active, inactive, sold]
+
+    GatePass:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        household_id:
+          type: string
+          format: uuid
+        vehicle_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        pass_type:
+          type: string
+          enum: [sticker, temporary, digital]
+        pass_number:
+          type: string
+        valid_from:
+          type: string
+          format: date
+        valid_to:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [active, expired, revoked, pending]
+        created_at:
+          type: string
+          format: date-time
+
+    ConstructionPermit:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        household_id:
+          type: string
+          format: uuid
+        residence_id:
+          type: string
+          format: uuid
+        project_title:
+          type: string
+        description:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        contractor_name:
+          type: string
+        permit_fee:
+          type: number
+          format: decimal
+        payment_status:
+          type: string
+          enum: [pending, paid, refunded]
+        status:
+          type: string
+          enum: [pending, approved, rejected, completed, cancelled]
+        created_at:
+          type: string
+          format: date-time
+
+    Announcement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        content:
+          type: string
+        priority:
+          type: string
+          enum: [low, normal, high, urgent]
+        target_audience:
+          type: object
+        delivery_method:
+          type: string
+          enum: [email, sms, push, in_app]
+        scheduled_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [draft, scheduled, sent, cancelled]
+        created_at:
+          type: string
+          format: date-time
+
+    CreateAnnouncementRequest:
+      type: object
+      required:
+        - title
+        - content
+        - target_audience
+        - delivery_method
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+        priority:
+          type: string
+          enum: [low, normal, high, urgent]
+          default: normal
+        target_audience:
+          type: object
+          properties:
+            roles:
+              type: array
+              items:
+                type: string
+            households:
+              type: array
+              items:
+                type: string
+                format: uuid
+        delivery_method:
+          type: string
+          enum: [email, sms, push, in_app]
+        scheduled_at:
+          type: string
+          format: date-time
+
+    Election:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        positions:
+          type: array
+          items:
+            type: object
+            properties:
+              title:
+                type: string
+              description:
+                type: string
+              requirements:
+                type: object
+        nomination_start:
+          type: string
+          format: date-time
+        nomination_end:
+          type: string
+          format: date-time
+        voting_start:
+          type: string
+          format: date-time
+        voting_end:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [planned, nomination, voting, completed, cancelled]
+        created_at:
+          type: string
+          format: date-time
+
+    CreateElectionRequest:
+      type: object
+      required:
+        - title
+        - description
+        - positions
+        - nomination_start
+        - nomination_end
+        - voting_start
+        - voting_end
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        positions:
+          type: array
+          items:
+            type: object
+            properties:
+              title:
+                type: string
+              description:
+                type: string
+              requirements:
+                type: object
+        nomination_start:
+          type: string
+          format: date-time
+        nomination_end:
+          type: string
+          format: date-time
+        voting_start:
+          type: string
+          format: date-time
+        voting_end:
+          type: string
+          format: date-time
+        eligibility_rules:
+          type: object
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        pages:
+          type: integer
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

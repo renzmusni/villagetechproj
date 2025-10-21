@@ -1,0 +1,1073 @@
+openapi: 3.0.3
+info:
+  title: HOA Residence API
+  description: Resident portal API for household management and service requests
+  version: 1.0.0
+  contact:
+    name: VillageTech Support
+    email: support@villagetech.com
+
+servers:
+  - url: https://api.villagetech.com/residence/v1
+    description: Production server
+
+security:
+  - BearerAuth: []
+
+paths:
+  /household:
+    get:
+      summary: Get household information
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Household details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/HouseholdDetail'
+    put:
+      summary: Update household information
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateHouseholdRequest'
+      responses:
+        '200':
+          description: Household updated successfully
+
+  /household/members:
+    get:
+      summary: List household members
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of household members
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+    post:
+      summary: Add household member
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMemberRequest'
+      responses:
+        '201':
+          description: Member added successfully
+        '400':
+          description: Invalid request data
+
+  /household/members/{memberId}:
+    put:
+      summary: Update household member
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMemberRequest'
+      responses:
+        '200':
+          description: Member updated successfully
+        '404':
+          description: Member not found
+    delete:
+      summary: Remove household member
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Member removed successfully
+
+  /household/beneficial-users:
+    get:
+      summary: List beneficial users
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of beneficial users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BeneficialUser'
+    post:
+      summary: Add beneficial user
+      tags:
+        - Household Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBeneficialUserRequest'
+      responses:
+        '201':
+          description: Beneficial user added successfully
+
+  /household/residences:
+    get:
+      summary: List household residences
+      tags:
+        - Residence Management
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of residences
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Residence'
+
+  /vehicles:
+    get:
+      summary: List household vehicles
+      tags:
+        - Vehicle Management
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of vehicles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Vehicle'
+    post:
+      summary: Add vehicle
+      tags:
+        - Vehicle Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVehicleRequest'
+      responses:
+        '201':
+          description: Vehicle added successfully
+
+  /vehicles/{vehicleId}:
+    put:
+      summary: Update vehicle
+      tags:
+        - Vehicle Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: vehicleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVehicleRequest'
+      responses:
+        '200':
+          description: Vehicle updated successfully
+        '404':
+          description: Vehicle not found
+    delete:
+      summary: Remove vehicle
+      tags:
+        - Vehicle Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: vehicleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Vehicle removed successfully
+
+  /gate-passes:
+    get:
+      summary: List household gate passes
+      tags:
+        - Gate Pass Management
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of gate passes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GatePass'
+    post:
+      summary: Request new gate pass
+      tags:
+        - Gate Pass Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGatePassRequest'
+      responses:
+        '201':
+          description: Gate pass request submitted
+        '400':
+          description: Invalid request data
+
+  /gate-passes/{passId}:
+    delete:
+      summary: Cancel gate pass request
+      tags:
+        - Gate Pass Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: passId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Gate pass cancelled
+        '404':
+          description: Gate pass not found
+
+  /guests:
+    get:
+      summary: List scheduled guests
+      tags:
+        - Guest Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [scheduled, checked_in, checked_out, cancelled]
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: List of guests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Guest'
+    post:
+      summary: Schedule guest visit
+      tags:
+        - Guest Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGuestRequest'
+      responses:
+        '201':
+          description: Guest visit scheduled
+        '400':
+          description: Invalid request data
+
+  /guests/{guestId}:
+    put:
+      summary: Update guest visit
+      tags:
+        - Guest Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: guestId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGuestRequest'
+      responses:
+        '200':
+          description: Guest visit updated
+        '404':
+          description: Guest not found
+    delete:
+      summary: Cancel guest visit
+      tags:
+        - Guest Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: guestId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Guest visit cancelled
+
+  /construction-permits:
+    get:
+      summary: List household construction permits
+      tags:
+        - Construction Management
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of construction permits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConstructionPermit'
+    post:
+      summary: Submit construction permit application
+      tags:
+        - Construction Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConstructionPermitRequest'
+      responses:
+        '201':
+          description: Construction permit application submitted
+        '400':
+          description: Invalid request data
+
+  /construction-permits/{permitId}/workers:
+    get:
+      summary: List construction workers for permit
+      tags:
+        - Construction Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: permitId
+          in: path
+          required: true
+          schema:
+            type: string
+          format: uuid
+      responses:
+        '200':
+          description: List of construction workers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConstructionWorker'
+    post:
+      summary: Add construction worker
+      tags:
+        - Construction Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: permitId
+          in: path
+          required: true
+          schema:
+            type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConstructionWorkerRequest'
+      responses:
+        '201':
+          description: Construction worker added
+        '400':
+          description: Invalid request data
+
+  /announcements:
+    get:
+      summary: List household announcements
+      tags:
+        - Communications
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: unread
+          in: query
+          schema:
+            type: boolean
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [low, normal, high, urgent]
+      responses:
+        '200':
+          description: List of announcements
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Announcement'
+
+  /announcements/{announcementId}/read:
+    post:
+      summary: Mark announcement as read
+      tags:
+        - Communications
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: announcementId
+          in: path
+          required: true
+          schema:
+            type: string
+          format: uuid
+      responses:
+        '200':
+          description: Announcement marked as read
+        '404':
+          description: Announcement not found
+
+components:
+  schemas:
+    HouseholdDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        primary_contact:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+        residences:
+          type: array
+          items:
+            $ref: '#/components/schemas/Residence'
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        vehicles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Vehicle'
+        beneficial_users:
+          type: array
+          items:
+            $ref: '#/components/schemas/BeneficialUser'
+
+    UpdateHouseholdRequest:
+      type: object
+      properties:
+        primary_contact:
+          type: string
+        phone:
+          type: string
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [household-head, household-member, household-beneficial-user]
+        status:
+          type: string
+          enum: [active, inactive]
+        created_at:
+          type: string
+          format: date-time
+
+    CreateMemberRequest:
+      type: object
+      required:
+        - email
+        - first_name
+        - last_name
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [household-head, household-member]
+
+    UpdateMemberRequest:
+      type: object
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [household-head, household-member]
+
+    BeneficialUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        relationship:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+        created_at:
+          type: string
+          format: date-time
+
+    CreateBeneficialUserRequest:
+      type: object
+      required:
+        - first_name
+        - last_name
+        - phone
+        - relationship
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        relationship:
+          type: string
+
+    Residence:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        address:
+          type: string
+        unit_number:
+          type: string
+        type:
+          type: string
+          enum: [house, apartment, condo, townhouse]
+        square_footage:
+          type: integer
+        bedrooms:
+          type: integer
+        bathrooms:
+          type: integer
+        status:
+          type: string
+          enum: [occupied, vacant, under_construction]
+
+    Vehicle:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        make:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        color:
+          type: string
+        license_plate:
+          type: string
+        registration_expiry:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [active, inactive, sold]
+        created_at:
+          type: string
+          format: date-time
+
+    CreateVehicleRequest:
+      type: object
+      required:
+        - make
+        - model
+        - year
+        - color
+        - license_plate
+        - registration_expiry
+      properties:
+        make:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        color:
+          type: string
+        license_plate:
+          type: string
+        vin:
+          type: string
+        registration_expiry:
+          type: string
+          format: date
+
+    UpdateVehicleRequest:
+      type: object
+      properties:
+        color:
+          type: string
+        registration_expiry:
+          type: string
+          format: date
+
+    GatePass:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        vehicle_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        pass_type:
+          type: string
+          enum: [sticker, temporary, digital]
+        pass_number:
+          type: string
+        valid_from:
+          type: string
+          format: date
+        valid_to:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [active, expired, revoked, pending]
+        qr_code:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CreateGatePassRequest:
+      type: object
+      required:
+        - vehicle_id
+        - user_id
+        - pass_type
+      properties:
+        vehicle_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        pass_type:
+          type: string
+          enum: [sticker, temporary, digital]
+        notes:
+          type: string
+
+    Guest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+        last_name:
+          type: string
+        visit_type:
+          type: string
+          enum: [day_trip, multi_day]
+        visit_date_start:
+          type: string
+          format: date-time
+        visit_date_end:
+          type: string
+          format: date-time
+        purpose:
+          type: string
+        vehicle_info:
+          type: object
+        status:
+          type: string
+          enum: [scheduled, checked_in, checked_out, cancelled]
+        notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CreateGuestRequest:
+      type: object
+      required:
+        - first_name
+        - last_name
+        - visit_type
+        - visit_date_start
+        - visit_date_end
+        - purpose
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        visit_type:
+          type: string
+          enum: [day_trip, multi_day]
+        visit_date_start:
+          type: string
+          format: date-time
+        visit_date_end:
+          type: string
+          format: date-time
+        purpose:
+          type: string
+        vehicle_info:
+          type: object
+          properties:
+            make:
+              type: string
+            model:
+              type: string
+            license_plate:
+              type: string
+        notes:
+          type: string
+
+    UpdateGuestRequest:
+      type: object
+      properties:
+        visit_date_start:
+          type: string
+          format: date-time
+        visit_date_end:
+          type: string
+          format: date-time
+        purpose:
+          type: string
+        notes:
+          type: string
+
+    ConstructionPermit:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        residence_id:
+          type: string
+          format: uuid
+        project_title:
+          type: string
+        description:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        contractor_name:
+          type: string
+        contractor_license:
+          type: string
+        permit_fee:
+          type: number
+          format: decimal
+        payment_status:
+          type: string
+          enum: [pending, paid, refunded]
+        status:
+          type: string
+          enum: [pending, approved, rejected, completed, cancelled]
+        created_at:
+          type: string
+          format: date-time
+
+    CreateConstructionPermitRequest:
+      type: object
+      required:
+        - residence_id
+        - project_title
+        - description
+        - start_date
+        - end_date
+        - contractor_name
+        - contractor_license
+      properties:
+        residence_id:
+          type: string
+          format: uuid
+        project_title:
+          type: string
+        description:
+          type: string
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        contractor_name:
+          type: string
+        contractor_license:
+          type: string
+        documents:
+          type: array
+          items:
+            type: object
+            properties:
+              filename:
+                type: string
+              content_type:
+                type: string
+              url:
+                type: string
+
+    ConstructionWorker:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        permit_id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+        last_name:
+          type: string
+        company:
+          type: string
+        phone:
+          type: string
+        pass_type:
+          type: string
+          enum: [daily, weekly, project_duration]
+        valid_from:
+          type: string
+          format: date-time
+        valid_to:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, expired, revoked]
+        created_at:
+          type: string
+          format: date-time
+
+    CreateConstructionWorkerRequest:
+      type: object
+      required:
+        - first_name
+        - last_name
+        - company
+        - phone
+        - pass_type
+        - valid_from
+        - valid_to
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        company:
+          type: string
+        phone:
+          type: string
+        pass_type:
+          type: string
+          enum: [daily, weekly, project_duration]
+        valid_from:
+          type: string
+          format: date-time
+        valid_to:
+          type: string
+          format: date-time
+
+    Announcement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        content:
+          type: string
+        priority:
+          type: string
+          enum: [low, normal, high, urgent]
+        sent_at:
+          type: string
+          format: date-time
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
