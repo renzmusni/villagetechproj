@@ -9,6 +9,8 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
+import { HouseholdsModule } from './modules/households/households.module';
+import { VehiclesModule } from './modules/vehicles/vehicles.module';
 
 @Module({
   imports: [
@@ -50,6 +52,8 @@ import { TenantsModule } from './modules/tenants/tenants.module';
     AuthModule,
     UsersModule,
     TenantsModule,
+    HouseholdsModule,
+    VehiclesModule,
   ],
 })
 export class AppModule {
