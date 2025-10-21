@@ -43,6 +43,7 @@ async function bootstrap() {
     .addTag('Tenants')
     .addTag('Households')
     .addTag('Vehicles')
+    .addTag('Gate Passes')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

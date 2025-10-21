@@ -11,6 +11,7 @@ import { UsersModule } from './modules/users/users.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
 import { HouseholdsModule } from './modules/households/households.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
+import { GatePassesModule } from './modules/gate-passes/gate-passes.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { VehiclesModule } from './modules/vehicles/vehicles.module';
     TenantsModule,
     HouseholdsModule,
     VehiclesModule,
+    GatePassesModule,
   ],
 })
 export class AppModule {
