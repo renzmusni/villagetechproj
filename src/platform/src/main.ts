@@ -5,8 +5,6 @@ import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
-import { AllExceptionsFilter } from '@hoa-platform/shared';
-import { LoggingInterceptor, TransformInterceptor } from '@hoa-platform/shared';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -24,19 +22,9 @@ async function bootstrap() {
     }),
   );
 
-  // Global filters
-  app.useGlobalFilters(new AllExceptionsFilter());
-
-  // Global interceptors
-  app.useGlobalInterceptors(
-    new LoggingInterceptor(),
-    new TransformInterceptor(),
-  );
-
   // CORS configuration
-  const corsOrigins = configService.get<string[]>('cors.origin');
   app.enableCors({
-    origin: corsOrigins,
+    origin: true,
     credentials: true,
   });
 
@@ -53,22 +41,14 @@ async function bootstrap() {
     .addTag('Authentication')
     .addTag('Users')
     .addTag('Tenants')
-    .addTag('Households')
-    .addTag('Residences')
-    .addTag('Vehicles')
-    .addTag('Gate Passes')
-    .addTag('Guests')
-    .addTag('Construction Permits')
-    .addTag('Announcements')
-    .addTag('Elections')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
   // Start server
-  const port = configService.get<number>('app.port');
-  const env = configService.get<string>('app.env');
+  const port = parseInt(process.env.PORT || '3000');
+  const env = process.env.NODE_ENV || 'development';
 
   await app.listen(port, '0.0.0.0');
 
