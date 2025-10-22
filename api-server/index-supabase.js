@@ -1,4 +1,5 @@
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -7,13 +8,87 @@ const { v4: uuidv4 } = require('uuid');
 // Import Supabase database
 const { supabase, testConnection, initializeDatabase } = require('./database');
 
+// Import error handling middleware
+const {
+  errorHandler,
+  asyncHandler,
+  validate,
+  requestLogger,
+  rateLimit,
+  sanitizeInput
+} = require('./middleware/errorHandler');
+
+// Import WebSocket server
+const SocketServer = require('./websocket/socketServer');
+
+// Import caching system
+const { getCacheManager, cacheMiddleware } = require('./cache/cacheManager');
+
 const app = express();
 const PORT = process.env.PORT || 4003;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-here';
 
+// Create HTTP server for WebSocket support
+const server = http.createServer(app);
+
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(sanitizeInput);
+app.use(requestLogger);
+
+// Rate limiting for sensitive endpoints
+app.use('/api/auth', rateLimit(5, 15 * 60 * 1000)); // 5 requests per 15 minutes for auth
+app.use('/api/security-incidents', rateLimit(50, 15 * 60 * 1000)); // 50 requests per 15 minutes for security incidents
+
+// Initialize cache manager
+const cache = getCacheManager({
+  enableRedis: process.env.NODE_ENV === 'production',
+  redisUrl: process.env.REDIS_URL,
+  defaultTtl: 300000, // 5 minutes
+  maxSize: 2000
+});
+
+// Add caching middleware for read-heavy endpoints
+app.use('/api/users', cacheMiddleware({
+  ttl: 600000, // 10 minutes
+  keyGenerator: (req) => cache.keys.user(req.user?.id, { tenant: req.user?.tenantId }),
+  condition: (cached) => cached.data?.id === req.params.id || req.query?.id,
+  invalidateOnMutation: true
+}));
+
+app.use('/api/households', cacheMiddleware({
+  ttl: 300000, // 5 minutes
+  keyGenerator: (req) => cache.keys.household(req.params?.id, { tenant: req.user?.tenantId }),
+  condition: (cached) => cached.data?.id === req.params?.id || req.query?.id,
+  invalidateOnMutation: true
+}));
+
+app.use('/api/security-incidents', cacheMiddleware({
+  ttl: 120000, // 2 minutes for incidents (need fresh data)
+  keyGenerator: (req) => cache.keys.statistics('incidents', { tenant: req.user?.tenantId }),
+  invalidateOnMutation: true
+}));
+
+app.use('/api/deliveries', cacheMiddleware({
+  ttl: 180000, // 3 minutes for deliveries
+  keyGenerator: (req) => cache.keys.search(req.query?.toString(), { tenant: req.user?.tenantId }),
+  invalidateOnMutation: true
+}));
+
+app.use('/api/announcements', cacheMiddleware({
+  ttl: 600000, // 10 minutes
+  keyGenerator: (req) => cache.keys.announcement(req.params?.id, { tenant: req.user?.tenantId }),
+  condition: (cached) => cached.data?.id === req.params?.id || req.query?.id,
+  invalidateOnMutation: true
+}));
+
+app.use('/api/payments', cacheMiddleware({
+  ttl: 300000, // 5 minutes
+  keyGenerator: (req) => cache.keys.payment(req.params?.id, { tenant: req.user?.tenantId }),
+  condition: (cached) => cached.data?.id === req.params?.id || req.query?.id,
+  invalidateOnMutation: true
+}));
 
 // JWT token generation
 const generateToken = (user) => {
@@ -1524,13 +1599,1936 @@ async function startServer() {
       }
     });
 
+    // Construction Permits Routes
+    app.get('/api/construction-permits', authenticateToken, async (req, res) => {
+      try {
+        const { page = 1, limit = 10, search, status, householdId } = req.query;
+        const tenantId = req.user.tenantId;
+
+        let query = supabase
+          .from('construction_permits')
+          .select(`
+            *,
+            households:household_id(name, unit_number),
+            users:requested_by(first_name, last_name, email)
+          `, { count: 'exact' })
+          .eq('tenant_id', tenantId);
+
+        if (search) {
+          query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%,contractor_name.ilike.%${search}%`);
+        }
+
+        if (status) {
+          query = query.eq('status', status);
+        }
+
+        if (householdId) {
+          query = query.eq('household_id', householdId);
+        }
+
+        const { data, error, count } = await query
+          .range((page - 1) * limit, page * limit - 1)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('Construction permits error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch construction permits'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: data || [],
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: count || 0
+          }
+        });
+
+      } catch (error) {
+        console.error('Construction permits error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.post('/api/construction-permits', authenticateToken, async (req, res) => {
+      try {
+        const {
+          householdId,
+          title,
+          description,
+          workType,
+          startDate,
+          endDate,
+          contractorName,
+          contractorContact,
+          contractorLicense,
+          estimatedCost,
+          specialRequirements,
+          workAreas
+        } = req.body;
+
+        const tenantId = req.user.tenantId;
+        const requestedBy = req.user.id;
+
+        // Validate required fields
+        if (!householdId || !title || !description || !workType || !startDate || !endDate) {
+          return res.status(400).json({
+            success: false,
+            message: 'Missing required fields'
+          });
+        }
+
+        // Generate permit number
+        const permitNumber = `PERMIT-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+
+        // Calculate duration
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const durationDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+
+        // Create construction permit
+        const { data, error } = await supabase
+          .from('construction_permits')
+          .insert([{
+            tenant_id: tenantId,
+            household_id: householdId,
+            requested_by: requestedBy,
+            permit_number: permitNumber,
+            title,
+            description,
+            work_type: workType,
+            start_date: startDate,
+            end_date: endDate,
+            duration_days: durationDays,
+            contractor_name: contractorName,
+            contractor_contact: contractorContact,
+            contractor_license: contractorLicense,
+            estimated_cost: estimatedCost,
+            special_requirements: specialRequirements,
+            work_areas: workAreas,
+            status: 'pending',
+            approved_by: null,
+            approved_at: null,
+            rejection_reason: null,
+            inspection_notes: null,
+            completion_notes: null,
+            created_at: new Date(),
+            updated_at: new Date()
+          }])
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Create construction permit error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to create construction permit'
+          });
+        }
+
+        res.status(201).json({
+          success: true,
+          data: data,
+          message: 'Construction permit request submitted successfully'
+        });
+
+      } catch (error) {
+        console.error('Create construction permit error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.put('/api/construction-permits/:id', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const {
+          title,
+          description,
+          workType,
+          startDate,
+          endDate,
+          contractorName,
+          contractorContact,
+          contractorLicense,
+          estimatedCost,
+          specialRequirements,
+          workAreas,
+          status
+        } = req.body;
+
+        const tenantId = req.user.tenantId;
+
+        // Verify permit belongs to tenant
+        const { data: existing, error: checkError } = await supabase
+          .from('construction_permits')
+          .select('*')
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .single();
+
+        if (checkError || !existing) {
+          return res.status(404).json({
+            success: false,
+            message: 'Construction permit not found'
+          });
+        }
+
+        const updateData = {
+          updated_at: new Date()
+        };
+
+        if (title) updateData.title = title;
+        if (description) updateData.description = description;
+        if (workType) updateData.work_type = workType;
+        if (startDate) updateData.start_date = startDate;
+        if (endDate) updateData.end_date = endDate;
+        if (contractorName) updateData.contractor_name = contractorName;
+        if (contractorContact) updateData.contractor_contact = contractorContact;
+        if (contractorLicense) updateData.contractor_license = contractorLicense;
+        if (estimatedCost) updateData.estimated_cost = estimatedCost;
+        if (specialRequirements !== undefined) updateData.special_requirements = specialRequirements;
+        if (workAreas) updateData.work_areas = workAreas;
+        if (status) updateData.status = status;
+
+        // Recalculate duration if dates changed
+        if (startDate && endDate) {
+          const start = new Date(startDate);
+          const end = new Date(endDate);
+          updateData.duration_days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+        }
+
+        const { data, error } = await supabase
+          .from('construction_permits')
+          .update(updateData)
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Update construction permit error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to update construction permit'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: data,
+          message: 'Construction permit updated successfully'
+        });
+
+      } catch (error) {
+        console.error('Update construction permit error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.post('/api/construction-permits/:id/approve', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { notes, approvedBy } = req.body;
+        const tenantId = req.user.tenantId;
+
+        // Verify permit belongs to tenant
+        const { data: existing, error: checkError } = await supabase
+          .from('construction_permits')
+          .select('*')
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .single();
+
+        if (checkError || !existing) {
+          return res.status(404).json({
+            success: false,
+            message: 'Construction permit not found'
+          });
+        }
+
+        // Approve permit
+        const { data, error } = await supabase
+          .from('construction_permits')
+          .update({
+            status: 'approved',
+            approved_by: approvedBy || req.user.id,
+            approved_at: new Date(),
+            inspection_notes: notes,
+            updated_at: new Date()
+          })
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Approve construction permit error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to approve construction permit'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: data,
+          message: 'Construction permit approved successfully'
+        });
+
+      } catch (error) {
+        console.error('Approve construction permit error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.post('/api/construction-permits/:id/reject', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { reason, rejectedBy } = req.body;
+        const tenantId = req.user.tenantId;
+
+        // Verify permit belongs to tenant
+        const { data: existing, error: checkError } = await supabase
+          .from('construction_permits')
+          .select('*')
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .single();
+
+        if (checkError || !existing) {
+          return res.status(404).json({
+            success: false,
+            message: 'Construction permit not found'
+          });
+        }
+
+        // Reject permit
+        const { data, error } = await supabase
+          .from('construction_permits')
+          .update({
+            status: 'rejected',
+            approved_by: rejectedBy || req.user.id,
+            approved_at: new Date(),
+            rejection_reason: reason,
+            updated_at: new Date()
+          })
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Reject construction permit error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to reject construction permit'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: data,
+          message: 'Construction permit rejected'
+        });
+
+      } catch (error) {
+        console.error('Reject construction permit error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.delete('/api/construction-permits/:id', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const tenantId = req.user.tenantId;
+
+        // Verify permit belongs to tenant
+        const { data: existing, error: checkError } = await supabase
+          .from('construction_permits')
+          .select('*')
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .single();
+
+        if (checkError || !existing) {
+          return res.status(404).json({
+            success: false,
+            message: 'Construction permit not found'
+          });
+        }
+
+        // Only allow deletion of pending permits
+        if (existing.status !== 'pending') {
+          return res.status(400).json({
+            success: false,
+            message: 'Cannot delete permit that is already processed'
+          });
+        }
+
+        // Delete permit
+        const { error } = await supabase
+          .from('construction_permits')
+          .delete()
+          .eq('id', id);
+
+        if (error) {
+          console.error('Delete construction permit error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to delete construction permit'
+          });
+        }
+
+        res.json({
+          success: true,
+          message: 'Construction permit deleted successfully'
+        });
+
+      } catch (error) {
+        console.error('Delete construction permit error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    // Fees and Payments Routes
+    app.get('/api/fees', authenticateToken, async (req, res) => {
+      try {
+        const { page = 1, limit = 10, search, status, type, householdId } = req.query;
+        const tenantId = req.user.tenantId;
+
+        let query = supabase
+          .from('fees')
+          .select(`
+            *,
+            households:household_id(name, unit_number),
+            users:created_by(first_name, last_name, email)
+          `, { count: 'exact' })
+          .eq('tenant_id', tenantId);
+
+        if (search) {
+          query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%,reference_number.ilike.%${search}%`);
+        }
+
+        if (status) {
+          query = query.eq('status', status);
+        }
+
+        if (type) {
+          query = query.eq('type', type);
+        }
+
+        if (householdId) {
+          query = query.eq('household_id', householdId);
+        }
+
+        const { data, error, count } = await query
+          .range((page - 1) * limit, page * limit - 1)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('Fees error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch fees'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: data || [],
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: count || 0
+          }
+        });
+
+      } catch (error) {
+        console.error('Fees error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.post('/api/fees', authenticateToken, async (req, res) => {
+      try {
+        const {
+          householdId,
+          title,
+          description,
+          type,
+          amount,
+          dueDate,
+          frequency,
+          autoBill
+        } = req.body;
+
+        const tenantId = req.user.tenantId;
+        const createdBy = req.user.id;
+
+        // Validate required fields
+        if (!householdId || !title || !type || !amount || !dueDate) {
+          return res.status(400).json({
+            success: false,
+            message: 'Missing required fields'
+          });
+        }
+
+        // Generate reference number
+        const referenceNumber = `FEE-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+
+        // Create fee
+        const { data, error } = await supabase
+          .from('fees')
+          .insert([{
+            tenant_id: tenantId,
+            household_id: householdId,
+            reference_number: referenceNumber,
+            title,
+            description,
+            type,
+            amount: parseFloat(amount),
+            due_date: dueDate,
+            frequency: frequency || 'one-time',
+            auto_bill: autoBill || false,
+            status: 'pending',
+            paid_amount: 0,
+            created_by: createdBy,
+            created_at: new Date(),
+            updated_at: new Date()
+          }])
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Create fee error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to create fee'
+          });
+        }
+
+        res.status(201).json({
+          success: true,
+          data: data,
+          message: 'Fee created successfully'
+        });
+
+      } catch (error) {
+        console.error('Create fee error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.get('/api/payments', authenticateToken, async (req, res) => {
+      try {
+        const { page = 1, limit = 10, search, status, method, householdId } = req.query;
+        const tenantId = req.user.tenantId;
+
+        let query = supabase
+          .from('payments')
+          .select(`
+            *,
+            households:household_id(name, unit_number),
+            fees:fee_id(title, reference_number),
+            users:processed_by(first_name, last_name, email)
+          `, { count: 'exact' })
+          .eq('tenant_id', tenantId);
+
+        if (search) {
+          query = query.or(`transaction_id.ilike.%${search}%,reference_number.ilike.%${search}%,notes.ilike.%${search}%`);
+        }
+
+        if (status) {
+          query = query.eq('status', status);
+        }
+
+        if (method) {
+          query = query.eq('payment_method', method);
+        }
+
+        if (householdId) {
+          query = query.eq('household_id', householdId);
+        }
+
+        const { data, error, count } = await query
+          .range((page - 1) * limit, page * limit - 1)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('Payments error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch payments'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: data || [],
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: count || 0
+          }
+        });
+
+      } catch (error) {
+        console.error('Payments error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.post('/api/payments', authenticateToken, async (req, res) => {
+      try {
+        const {
+          householdId,
+          feeId,
+          amount,
+          paymentMethod,
+          transactionId,
+          notes
+        } = req.body;
+
+        const tenantId = req.user.tenantId;
+        const processedBy = req.user.id;
+
+        // Validate required fields
+        if (!householdId || !amount || !paymentMethod) {
+          return res.status(400).json({
+            success: false,
+            message: 'Missing required fields'
+          });
+        }
+
+        // Generate transaction ID if not provided
+        const transactionId_final = transactionId || `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+
+        // Create payment
+        const { data, error } = await supabase
+          .from('payments')
+          .insert([{
+            tenant_id: tenantId,
+            household_id: householdId,
+            fee_id: feeId || null,
+            transaction_id: transactionId_final,
+            amount: parseFloat(amount),
+            payment_method: paymentMethod,
+            status: 'completed',
+            notes,
+            processed_by: processedBy,
+            created_at: new Date(),
+            updated_at: new Date()
+          }])
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Create payment error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to create payment'
+          });
+        }
+
+        // Update fee paid amount if fee_id is provided
+        if (feeId) {
+          const { data: fee } = await supabase
+            .from('fees')
+            .select('paid_amount, amount')
+            .eq('id', feeId)
+            .single();
+
+          if (fee) {
+            const newPaidAmount = fee.paid_amount + parseFloat(amount);
+            const newStatus = newPaidAmount >= fee.amount ? 'paid' : 'partial';
+
+            await supabase
+              .from('fees')
+              .update({
+                paid_amount: newPaidAmount,
+                status: newStatus,
+                updated_at: new Date()
+              })
+              .eq('id', feeId);
+          }
+        }
+
+        res.status(201).json({
+          success: true,
+          data: data,
+          message: 'Payment processed successfully'
+        });
+
+      } catch (error) {
+        console.error('Create payment error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.get('/api/payments/statistics', authenticateToken, async (req, res) => {
+      try {
+        const { startDate, endDate, householdId } = req.query;
+        const tenantId = req.user.tenantId;
+
+        // Get payment statistics
+        let paymentsQuery = supabase
+          .from('payments')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'completed');
+
+        if (startDate) {
+          paymentsQuery = paymentsQuery.gte('created_at', startDate);
+        }
+        if (endDate) {
+          paymentsQuery = paymentsQuery.lte('created_at', endDate);
+        }
+        if (householdId) {
+          paymentsQuery = paymentsQuery.eq('household_id', householdId);
+        }
+
+        const { data: payments, error: paymentsError } = await paymentsQuery;
+
+        if (paymentsError) {
+          console.error('Payment statistics error:', paymentsError);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch payment statistics'
+          });
+        }
+
+        // Get fee statistics
+        let feesQuery = supabase
+          .from('fees')
+          .select('*')
+          .eq('tenant_id', tenantId);
+
+        if (householdId) {
+          feesQuery = feesQuery.eq('household_id', householdId);
+        }
+
+        const { data: fees, error: feesError } = await feesQuery;
+
+        if (feesError) {
+          console.error('Fee statistics error:', feesError);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch fee statistics'
+          });
+        }
+
+        // Calculate statistics
+        const totalRevenue = payments?.reduce((sum, payment) => sum + payment.amount, 0) || 0;
+        const totalFees = fees?.reduce((sum, fee) => sum + fee.amount, 0) || 0;
+        const totalPaid = fees?.reduce((sum, fee) => sum + fee.paid_amount, 0) || 0;
+        const outstandingBalance = totalFees - totalPaid;
+
+        const paymentMethods = payments?.reduce((acc, payment) => {
+          acc[payment.payment_method] = (acc[payment.payment_method] || 0) + payment.amount;
+          return acc;
+        }, {}) || {};
+
+        const feeTypes = fees?.reduce((acc, fee) => {
+          acc[fee.type] = (acc[fee.type] || 0) + fee.amount;
+          return acc;
+        }, {}) || {};
+
+        const feeStatuses = fees?.reduce((acc, fee) => {
+          acc[fee.status] = (acc[fee.status] || 0) + 1;
+          return acc;
+        }, {}) || {};
+
+        res.json({
+          success: true,
+          data: {
+            totalRevenue,
+            totalFees,
+            totalPaid,
+            outstandingBalance,
+            paymentMethods,
+            feeTypes,
+            feeStatuses,
+            totalTransactions: payments?.length || 0,
+            totalFeesCount: fees?.length || 0
+          }
+        });
+
+      } catch (error) {
+        console.error('Payment statistics error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    // Deliveries Routes
+    app.get('/api/deliveries', authenticateToken, async (req, res) => {
+      try {
+        const { page = 1, limit = 10, search, status, householdId } = req.query;
+        const tenantId = req.user.tenantId;
+
+        let query = supabase
+          .from('deliveries')
+          .select(`
+            *,
+            households:household_id(name, unit_number),
+            users:recipient_id(first_name, last_name, email)
+          `, { count: 'exact' })
+          .eq('tenant_id', tenantId);
+
+        if (search) {
+          query = query.or(`tracking_number.ilike.%${search}%,courier_name.ilike.%${search}%,description.ilike.%${search}%`);
+        }
+
+        if (status) {
+          query = query.eq('status', status);
+        }
+
+        if (householdId) {
+          query = query.eq('household_id', householdId);
+        }
+
+        const { data, error, count } = await query
+          .range((page - 1) * limit, page * limit - 1)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('Deliveries error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch deliveries'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: data || [],
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: count || 0
+          }
+        });
+
+      } catch (error) {
+        console.error('Deliveries error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.post('/api/deliveries', authenticateToken, async (req, res) => {
+      try {
+        const {
+          householdId,
+          recipientId,
+          trackingNumber,
+          courierName,
+          description,
+          deliveryType,
+          expectedDeliveryDate,
+          notes
+        } = req.body;
+
+        const tenantId = req.user.tenantId;
+        const receivedBy = req.user.id;
+
+        // Validate required fields
+        if (!householdId || !trackingNumber || !courierName || !deliveryType) {
+          return res.status(400).json({
+            success: false,
+            message: 'Missing required fields'
+          });
+        }
+
+        // Create delivery
+        const { data, error } = await supabase
+          .from('deliveries')
+          .insert([{
+            tenant_id: tenantId,
+            household_id: householdId,
+            recipient_id: recipientId || null,
+            tracking_number: trackingNumber,
+            courier_name: courierName,
+            description,
+            delivery_type: deliveryType,
+            expected_delivery_date: expectedDeliveryDate || null,
+            status: 'pending',
+            notes,
+            received_by: receivedBy,
+            created_at: new Date(),
+            updated_at: new Date()
+          }])
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Create delivery error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to create delivery'
+          });
+        }
+
+        res.status(201).json({
+          success: true,
+          data: data,
+          message: 'Delivery logged successfully'
+        });
+
+      } catch (error) {
+        console.error('Create delivery error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.put('/api/deliveries/:id', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const {
+          recipientId,
+          trackingNumber,
+          courierName,
+          description,
+          deliveryType,
+          expectedDeliveryDate,
+          status,
+          notes
+        } = req.body;
+
+        const tenantId = req.user.tenantId;
+
+        // Verify delivery belongs to tenant
+        const { data: existing, error: checkError } = await supabase
+          .from('deliveries')
+          .select('*')
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .single();
+
+        if (checkError || !existing) {
+          return res.status(404).json({
+            success: false,
+            message: 'Delivery not found'
+          });
+        }
+
+        const updateData = {
+          updated_at: new Date()
+        };
+
+        if (recipientId !== undefined) updateData.recipient_id = recipientId;
+        if (trackingNumber) updateData.tracking_number = trackingNumber;
+        if (courierName) updateData.courier_name = courierName;
+        if (description !== undefined) updateData.description = description;
+        if (deliveryType) updateData.delivery_type = deliveryType;
+        if (expectedDeliveryDate !== undefined) updateData.expected_delivery_date = expectedDeliveryDate;
+        if (status) updateData.status = status;
+        if (notes !== undefined) updateData.notes = notes;
+
+        // Set actual delivery date when marked as delivered
+        if (status === 'delivered' && existing.status !== 'delivered') {
+          updateData.actual_delivery_date = new Date();
+          updateData.delivered_by = req.user.id;
+        }
+
+        const { data, error } = await supabase
+          .from('deliveries')
+          .update(updateData)
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Update delivery error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to update delivery'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: data,
+          message: 'Delivery updated successfully'
+        });
+
+      } catch (error) {
+        console.error('Update delivery error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.delete('/api/deliveries/:id', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const tenantId = req.user.tenantId;
+
+        // Verify delivery belongs to tenant
+        const { data: existing, error: checkError } = await supabase
+          .from('deliveries')
+          .select('*')
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .single();
+
+        if (checkError || !existing) {
+          return res.status(404).json({
+            success: false,
+            message: 'Delivery not found'
+          });
+        }
+
+        // Delete delivery
+        const { error } = await supabase
+          .from('deliveries')
+          .delete()
+          .eq('id', id);
+
+        if (error) {
+          console.error('Delete delivery error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to delete delivery'
+          });
+        }
+
+        res.json({
+          success: true,
+          message: 'Delivery deleted successfully'
+        });
+
+      } catch (error) {
+        console.error('Delete delivery error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.post('/api/deliveries/:id/check-in', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { location, notes } = req.body;
+        const tenantId = req.user.tenantId;
+
+        // Verify delivery belongs to tenant
+        const { data: existing, error: checkError } = await supabase
+          .from('deliveries')
+          .select('*')
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .single();
+
+        if (checkError || !existing) {
+          return res.status(404).json({
+            success: false,
+            message: 'Delivery not found'
+          });
+        }
+
+        // Update delivery status to arrived
+        const { data, error } = await supabase
+          .from('deliveries')
+          .update({
+            status: 'arrived',
+            actual_delivery_date: new Date(),
+            delivery_location: location,
+            delivery_notes: notes,
+            delivered_by: req.user.id,
+            updated_at: new Date()
+          })
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Delivery check-in error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to check in delivery'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: data,
+          message: 'Delivery checked in successfully'
+        });
+
+      } catch (error) {
+        console.error('Delivery check-in error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.post('/api/deliveries/:id/notify', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { message, channels } = req.body;
+        const tenantId = req.user.tenantId;
+
+        // Verify delivery belongs to tenant
+        const { data: existing, error: checkError } = await supabase
+          .from('deliveries')
+          .select(`
+            *,
+            households:household_id(name, unit_number),
+            users:recipient_id(first_name, last_name, email, phone)
+          `)
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .single();
+
+        if (checkError || !existing) {
+          return res.status(404).json({
+            success: false,
+            message: 'Delivery not found'
+          });
+        }
+
+        // Create notification
+        const notificationData = {
+          tenant_id: tenantId,
+          household_id: existing.household_id,
+          recipient_id: existing.recipient_id,
+          type: 'delivery',
+          title: 'Delivery Update',
+          message: message || `Your delivery (${existing.tracking_number}) has arrived and is ready for pickup.`,
+          channels: channels || ['app'],
+          related_entity_type: 'delivery',
+          related_entity_id: id,
+          status: 'sent',
+          created_at: new Date()
+        };
+
+        const { data, error } = await supabase
+          .from('notifications')
+          .insert([notificationData])
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Create notification error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to create notification'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: { notification: data, delivery: existing },
+          message: 'Notification sent successfully'
+        });
+
+      } catch (error) {
+        console.error('Notify delivery error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.get('/api/deliveries/statistics', authenticateToken, async (req, res) => {
+      try {
+        const { startDate, endDate, householdId } = req.query;
+        const tenantId = req.user.tenantId;
+
+        // Get delivery statistics
+        let deliveriesQuery = supabase
+          .from('deliveries')
+          .select('*')
+          .eq('tenant_id', tenantId);
+
+        if (startDate) {
+          deliveriesQuery = deliveriesQuery.gte('created_at', startDate);
+        }
+        if (endDate) {
+          deliveriesQuery = deliveriesQuery.lte('created_at', endDate);
+        }
+        if (householdId) {
+          deliveriesQuery = deliveriesQuery.eq('household_id', householdId);
+        }
+
+        const { data: deliveries, error: deliveriesError } = await deliveriesQuery;
+
+        if (deliveriesError) {
+          console.error('Delivery statistics error:', deliveriesError);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch delivery statistics'
+          });
+        }
+
+        // Calculate statistics
+        const totalDeliveries = deliveries?.length || 0;
+        const pendingDeliveries = deliveries?.filter(d => d.status === 'pending').length || 0;
+        const arrivedDeliveries = deliveries?.filter(d => d.status === 'arrived').length || 0;
+        const deliveredDeliveries = deliveries?.filter(d => d.status === 'delivered').length || 0;
+
+        const courierStats = deliveries?.reduce((acc, delivery) => {
+          acc[delivery.courier_name] = (acc[delivery.courier_name] || 0) + 1;
+          return acc;
+        }, {}) || {};
+
+        const deliveryTypeStats = deliveries?.reduce((acc, delivery) => {
+          acc[delivery.delivery_type] = (acc[delivery.delivery_type] || 0) + 1;
+          return acc;
+        }, {}) || {};
+
+        res.json({
+          success: true,
+          data: {
+            totalDeliveries,
+            pendingDeliveries,
+            arrivedDeliveries,
+            deliveredDeliveries,
+            courierStats,
+            deliveryTypeStats
+          }
+        });
+
+      } catch (error) {
+        console.error('Delivery statistics error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    // Security Incidents API
+    app.get('/api/security-incidents', authenticateToken, async (req, res) => {
+      try {
+        const {
+          page = 1,
+          limit = 50,
+          status,
+          severity,
+          type,
+          startDate,
+          endDate,
+          householdId,
+          search
+        } = req.query;
+
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+
+        let incidentsQuery = supabase
+          .from('security_incidents')
+          .select(`
+            *,
+            household:household_id (
+              id,
+              unit_number,
+              address
+            ),
+            reported_by_user:reported_by (
+              id,
+              firstName,
+              lastName,
+              email
+            ),
+            assigned_to_user:assigned_to (
+              id,
+              firstName,
+              lastName,
+              email
+            )
+          `)
+          .eq('tenant_id', req.user.tenantId)
+          .order('created_at', { ascending: false });
+
+        // Apply filters
+        if (status) {
+          incidentsQuery = incidentsQuery.eq('status', status);
+        }
+        if (severity) {
+          incidentsQuery = incidentsQuery.eq('severity_level', severity);
+        }
+        if (type) {
+          incidentsQuery = incidentsQuery.eq('incident_type', type);
+        }
+        if (householdId) {
+          incidentsQuery = incidentsQuery.eq('household_id', householdId);
+        }
+        if (startDate) {
+          incidentsQuery = incidentsQuery.gte('created_at', startDate);
+        }
+        if (endDate) {
+          incidentsQuery = incidentsQuery.lte('created_at', endDate);
+        }
+        if (search) {
+          incidentsQuery = incidentsQuery.or(`title.ilike.%${search}%,description.ilike.%${search}%,location.ilike.%${search}%`);
+        }
+
+        // Get total count
+        const { count, error: countError } = await supabase
+          .from('security_incidents')
+          .select('*', { count: 'exact', head: true })
+          .eq('tenant_id', req.user.tenantId);
+
+        if (countError) {
+          console.error('Security incidents count error:', countError);
+        }
+
+        // Get paginated results
+        const { data: incidents, error } = await incidentsQuery
+          .range(offset, offset + parseInt(limit) - 1);
+
+        if (error) {
+          console.error('Security incidents fetch error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch security incidents'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: incidents || [],
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: count || 0,
+            pages: Math.ceil((count || 0) / parseInt(limit))
+          }
+        });
+
+      } catch (error) {
+        console.error('Security incidents error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.post('/api/security-incidents', authenticateToken, async (req, res) => {
+      try {
+        const {
+          title,
+          description,
+          incident_type,
+          severity_level,
+          location,
+          household_id,
+          occurred_at,
+          suspected_individuals,
+          witnesses,
+          evidence,
+          immediate_action_taken,
+          reported_by
+        } = req.body;
+
+        // Validation
+        if (!title || !description || !incident_type || !severity_level || !location) {
+          return res.status(400).json({
+            success: false,
+            message: 'Title, description, incident type, severity level, and location are required'
+          });
+        }
+
+        const incidentData = {
+          tenant_id: req.user.tenantId,
+          title,
+          description,
+          incident_type,
+          severity_level,
+          location,
+          household_id: household_id || null,
+          occurred_at: occurred_at || new Date().toISOString(),
+          suspected_individuals: suspected_individuals || [],
+          witnesses: witnesses || [],
+          evidence: evidence || [],
+          immediate_action_taken: immediate_action_taken || '',
+          status: 'open',
+          reported_by: reported_by || req.user.id,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
+        const { data: incident, error } = await supabase
+          .from('security_incidents')
+          .insert([incidentData])
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Security incident creation error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to create security incident'
+          });
+        }
+
+        // Send real-time WebSocket notifications
+        if (global.socketServer) {
+          await global.socketServer.sendSecurityIncidentAlert(req.user.tenantId, {
+            ...incident,
+            reported_by_user: {
+              id: req.user.id,
+              firstName: req.user.firstName,
+              lastName: req.user.lastName,
+              email: req.user.email
+            }
+          });
+        }
+
+        // Create database notification for high severity incidents
+        if (severity_level === 'critical' || severity_level === 'high') {
+          await supabase
+            .from('notifications')
+            .insert([{
+              tenant_id: req.user.tenantId,
+              user_id: req.user.id,
+              type: 'security_incident',
+              title: `Security Incident: ${title}`,
+              message: `A ${severity_level} severity security incident has been reported at ${location}`,
+              data: { incident_id: incident.id },
+              is_read: false,
+              created_at: new Date().toISOString()
+            }]);
+        }
+
+        res.status(201).json({
+          success: true,
+          data: incident,
+          message: 'Security incident created successfully'
+        });
+
+      } catch (error) {
+        console.error('Security incident creation error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.get('/api/security-incidents/:id', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const { data: incident, error } = await supabase
+          .from('security_incidents')
+          .select(`
+            *,
+            household:household_id (
+              id,
+              unit_number,
+              address
+            ),
+            reported_by_user:reported_by (
+              id,
+              firstName,
+              lastName,
+              email
+            ),
+            assigned_to_user:assigned_to (
+              id,
+              firstName,
+              lastName,
+              email
+            )
+          `)
+          .eq('id', id)
+          .eq('tenant_id', req.user.tenantId)
+          .single();
+
+        if (error) {
+          if (error.code === 'PGRST116') {
+            return res.status(404).json({
+              success: false,
+              message: 'Security incident not found'
+            });
+          }
+          console.error('Security incident fetch error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch security incident'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: incident
+        });
+
+      } catch (error) {
+        console.error('Security incident fetch error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.put('/api/security-incidents/:id', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const updateData = req.body;
+
+        // Remove fields that shouldn't be updated directly
+        delete updateData.id;
+        delete updateData.tenant_id;
+        delete updateData.created_at;
+        updateData.updated_at = new Date().toISOString();
+
+        const { data: incident, error } = await supabase
+          .from('security_incidents')
+          .update(updateData)
+          .eq('id', id)
+          .eq('tenant_id', req.user.tenantId)
+          .select()
+          .single();
+
+        if (error) {
+          if (error.code === 'PGRST116') {
+            return res.status(404).json({
+              success: false,
+              message: 'Security incident not found'
+            });
+          }
+          console.error('Security incident update error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to update security incident'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: incident,
+          message: 'Security incident updated successfully'
+        });
+
+      } catch (error) {
+        console.error('Security incident update error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.delete('/api/security-incidents/:id', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        // Check if incident exists and belongs to tenant
+        const { data: incident, error: fetchError } = await supabase
+          .from('security_incidents')
+          .select('id, status')
+          .eq('id', id)
+          .eq('tenant_id', req.user.tenantId)
+          .single();
+
+        if (fetchError || !incident) {
+          return res.status(404).json({
+            success: false,
+            message: 'Security incident not found'
+          });
+        }
+
+        // Only allow deletion of resolved incidents
+        if (incident.status !== 'resolved') {
+          return res.status(400).json({
+            success: false,
+            message: 'Only resolved incidents can be deleted'
+          });
+        }
+
+        const { error } = await supabase
+          .from('security_incidents')
+          .delete()
+          .eq('id', id);
+
+        if (error) {
+          console.error('Security incident deletion error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to delete security incident'
+          });
+        }
+
+        res.json({
+          success: true,
+          message: 'Security incident deleted successfully'
+        });
+
+      } catch (error) {
+        console.error('Security incident deletion error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.post('/api/security-incidents/:id/assign', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { assigned_to, notes } = req.body;
+
+        if (!assigned_to) {
+          return res.status(400).json({
+            success: false,
+            message: 'Assigned user ID is required'
+          });
+        }
+
+        const { data: incident, error } = await supabase
+          .from('security_incidents')
+          .update({
+            assigned_to,
+            status: 'in_progress',
+            notes: notes || '',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', id)
+          .eq('tenant_id', req.user.tenantId)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Security incident assignment error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to assign security incident'
+          });
+        }
+
+        // Create notification for assigned user
+        if (assigned_to !== req.user.id) {
+          await supabase
+            .from('notifications')
+            .insert([{
+              tenant_id: req.user.tenantId,
+              user_id: assigned_to,
+              type: 'incident_assigned',
+              title: 'Security Incident Assigned',
+              message: `You have been assigned to investigate: ${incident.title}`,
+              data: { incident_id: incident.id },
+              is_read: false,
+              created_at: new Date().toISOString()
+            }]);
+        }
+
+        res.json({
+          success: true,
+          data: incident,
+          message: 'Security incident assigned successfully'
+        });
+
+      } catch (error) {
+        console.error('Security incident assignment error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.post('/api/security-incidents/:id/resolve', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { resolution_notes, final_action_taken, follow_up_required } = req.body;
+
+        const { data: incident, error } = await supabase
+          .from('security_incidents')
+          .update({
+            status: 'resolved',
+            resolution_notes: resolution_notes || '',
+            final_action_taken: final_action_taken || '',
+            follow_up_required: follow_up_required || false,
+            resolved_at: new Date().toISOString(),
+            resolved_by: req.user.id,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', id)
+          .eq('tenant_id', req.user.tenantId)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Security incident resolution error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to resolve security incident'
+          });
+        }
+
+        // Create notification for reporter
+        if (incident.reported_by !== req.user.id) {
+          await supabase
+            .from('notifications')
+            .insert([{
+              tenant_id: req.user.tenantId,
+              user_id: incident.reported_by,
+              type: 'incident_resolved',
+              title: 'Security Incident Resolved',
+              message: `The security incident "${incident.title}" has been resolved`,
+              data: { incident_id: incident.id },
+              is_read: false,
+              created_at: new Date().toISOString()
+            }]);
+        }
+
+        res.json({
+          success: true,
+          data: incident,
+          message: 'Security incident resolved successfully'
+        });
+
+      } catch (error) {
+        console.error('Security incident resolution error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.get('/api/security-incidents/statistics', authenticateToken, async (req, res) => {
+      try {
+        const { startDate, endDate, householdId } = req.query;
+
+        let incidentsQuery = supabase
+          .from('security_incidents')
+          .select('*')
+          .eq('tenant_id', req.user.tenantId);
+
+        // Apply date filters
+        if (startDate) {
+          incidentsQuery = incidentsQuery.gte('created_at', startDate);
+        }
+        if (endDate) {
+          incidentsQuery = incidentsQuery.lte('created_at', endDate);
+        }
+        if (householdId) {
+          incidentsQuery = incidentsQuery.eq('household_id', householdId);
+        }
+
+        const { data: incidents, error: incidentsError } = await incidentsQuery;
+
+        if (incidentsError) {
+          console.error('Security incidents statistics error:', incidentsError);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch security incidents statistics'
+          });
+        }
+
+        const totalIncidents = incidents?.length || 0;
+        const openIncidents = incidents?.filter(i => i.status === 'open').length || 0;
+        const inProgressIncidents = incidents?.filter(i => i.status === 'in_progress').length || 0;
+        const resolvedIncidents = incidents?.filter(i => i.status === 'resolved').length || 0;
+
+        const severityStats = incidents?.reduce((acc, incident) => {
+          acc[incident.severity_level] = (acc[incident.severity_level] || 0) + 1;
+          return acc;
+        }, {}) || {};
+
+        const typeStats = incidents?.reduce((acc, incident) => {
+          acc[incident.incident_type] = (acc[incident.incident_type] || 0) + 1;
+          return acc;
+        }, {}) || {};
+
+        const locationStats = incidents?.reduce((acc, incident) => {
+          acc[incident.location] = (acc[incident.location] || 0) + 1;
+          return acc;
+        }, {}) || {};
+
+        // Calculate average resolution time
+        const resolvedIncidentsData = incidents?.filter(i => i.status === 'resolved' && i.resolved_at) || [];
+        const averageResolutionTime = resolvedIncidentsData.length > 0
+          ? resolvedIncidentsData.reduce((total, incident) => {
+              const created = new Date(incident.created_at);
+              const resolved = new Date(incident.resolved_at);
+              return total + (resolved - created);
+            }, 0) / resolvedIncidentsData.length / (1000 * 60 * 60) // in hours
+          : 0;
+
+        res.json({
+          success: true,
+          data: {
+            totalIncidents,
+            openIncidents,
+            inProgressIncidents,
+            resolvedIncidents,
+            severityStats,
+            typeStats,
+            locationStats,
+            averageResolutionTime: Math.round(averageResolutionTime * 10) / 10,
+            resolutionRate: totalIncidents > 0 ? Math.round((resolvedIncidents / totalIncidents) * 100) : 0
+          }
+        });
+
+      } catch (error) {
+        console.error('Security incidents statistics error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    // Error handling middleware (must be last)
+    app.use(errorHandler);
+
+    // Initialize WebSocket server
+    const socketServer = new SocketServer(server);
+
+    // Make socket server available globally for API endpoints to use
+    global.socketServer = socketServer;
+
+    // Performance monitoring and cache statistics endpoint
+    app.get('/api/performance/stats', authenticateToken, asyncHandler(async (req, res) => {
+      try {
+        const cacheStats = await cache.getStats();
+        const memoryUsage = process.memoryUsage();
+        const cpuUsage = process.cpuUsage();
+
+        // Get active connections from WebSocket server
+        const activeConnections = global.socketServer ? global.socketServer.getConnectedUsers().length : 0;
+
+        const stats = {
+          cache: cacheStats,
+          performance: {
+            memory: {
+              rss: Math.round(memoryUsage.rss / 1024 / 1024 * 100) / 100, // MB
+              heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024 * 100) / 100, // MB
+              heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024 * 100) / 100, // MB
+              external: Math.round(memoryUsage.external / 1024 / 1024 * 100) / 100 // MB
+              heapLimit: Math.round(memoryUsage.heapLimit / 1024 / 1024 * 100) / 100 // MB
+            },
+            cpu: {
+              user: Math.round(cpuUsage.user / 1000 * 100) / 100, // percentage
+              system: Math.round(cpuUsage.system / 1000 * 100) / 100, // percentage
+              idle: Math.round(cpuUsage.idle / 1000 * 100) / 100 // percentage
+              ir: Math.round(cpuUsage.ir / 1000 * 100) / 100, // percentage
+            },
+            uptime: {
+              seconds: Math.round(process.uptime()),
+              human: `${Math.floor(process.uptime() / 3600)}h ${Math.floor((process.uptime() % 3600) / 60)}m`
+            },
+            connections: activeConnections,
+            timestamp: new Date().toISOString()
+          }
+        };
+
+        res.json({
+          success: true,
+          data: stats
+        });
+
+      } catch (error) {
+        console.error('Performance stats error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Failed to fetch performance statistics'
+        });
+      }
+    }));
+
+    // Cache health check endpoint
+    app.get('/api/cache/health', authenticateToken, asyncHandler(async (req, res) => {
+      try {
+        const health = await cache.healthCheck();
+        res.json({
+          success: true,
+          data: health
+        });
+      } catch (error) {
+        console.error('Cache health check error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Cache health check failed'
+        });
+      }
+    }));
+
+    // Cache management endpoint
+    app.post('/api/cache/clear', authenticateToken, asyncHandler(async (req, res) => {
+      try {
+        const { pattern } = req.body;
+
+        if (!pattern || typeof pattern !== 'string') {
+          return res.status(400).json({
+            success: false,
+            message: 'Pattern is required'
+          });
+        }
+
+        const success = await cache.clear(pattern);
+        res.json({
+          success,
+          message: success ? `Cache cleared for pattern: ${pattern}` : 'Failed to clear cache'
+        });
+      } catch (error) {
+        console.error('Cache clear error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Failed to clear cache'
+        });
+      }
+    }));
+
     // Start server
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
       console.log(`🚀 HOA Community Platform API Server Started!`);
       console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🌐 Server URL: http://localhost:${PORT}`);
       console.log(`🔍 API Prefix: /api`);
       console.log(`📚 Health Check: http://localhost:${PORT}/api/health`);
+      console.log(`🔌 WebSocket Server: ws://localhost:${PORT}`);
       console.log(`💾 Database: ${connected ? 'Supabase (PostgreSQL)' : 'In-memory (fallback)'}`);
       console.log(`✅ Server is ready to accept requests`);
     });

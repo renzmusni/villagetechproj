@@ -1,0 +1,47 @@
+{
+  "name": "hoa-api-tests",
+  "version": "1.0.0",
+  "description": "HOA Community Platform API Tests",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:ci": "jest --ci --coverage --watchAll=false",
+    "test:auth": "jest auth.test.js",
+    "test:api": "jest api.test.js --testPathPattern=api",
+    "test:security": "jest security.test.js",
+    "test:performance": "jest performance.test.js",
+    "test:integration": "jest integration.test.js",
+    "test:all": "jest --detectOpenHandles --coverage --forceExit"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/__tests__/**/*.js",
+      "**/?(*.)+(spec|test).js"
+    ],
+    "setupFilesAfterEnv": ["<rootDir>/tests/setup.js"],
+    "collectCoverageFrom": [
+      "../**/*.js",
+      "!../tests/**",
+      "!../database.js",
+      "!../websocket/**",
+      "!../cache/**",
+      "!**/node_modules/**"
+    ],
+    "coverageReporters": [
+      "text",
+      "lcov",
+      "html",
+      "json"
+    ],
+    "testTimeout": 10000,
+    "verbose": true,
+    "collectCoverage": true
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3"
+  }
+}
