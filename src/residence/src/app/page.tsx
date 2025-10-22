@@ -1,10 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { Home, Car, Users, CreditCard, Bell, Calendar, Plus, User, Settings, LogOut, AlertCircle, QrCode, Package } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { announcementsAPI, profileAPI } from '../lib/api'
 
 export default function ResidencePortal() {
+  const router = useRouter()
   const [activeTab, setActiveTab] = useState('home')
   const [user, setUser] = useState<any>(null)
   const [announcements, setAnnouncements] = useState<any[]>([])
@@ -168,16 +171,30 @@ export default function ResidencePortal() {
           <h2 className="text-lg font-semibold text-gray-900 mb-3">Quick Actions</h2>
           <div className="grid grid-cols-2 gap-3">
             {quickActions.map((action, index) => (
-              <button
-                key={index}
-                className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-all text-left active:scale-95"
-              >
-                <div className={`w-10 h-10 ${action.color} rounded-lg flex items-center justify-center mb-3`}>
-                  <action.icon className="w-5 h-5 text-white" />
-                </div>
-                <h3 className="font-semibold text-gray-900 text-sm mb-1">{action.title}</h3>
-                <p className="text-xs text-gray-600 line-clamp-2">{action.description}</p>
-              </button>
+              action.title === 'Guest QR' ? (
+                <Link
+                  key={index}
+                  href="/guests"
+                  className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-all text-left active:scale-95"
+                >
+                  <div className={`w-10 h-10 ${action.color} rounded-lg flex items-center justify-center mb-3`}>
+                    <action.icon className="w-5 h-5 text-white" />
+                  </div>
+                  <h3 className="font-semibold text-gray-900 text-sm mb-1">{action.title}</h3>
+                  <p className="text-xs text-gray-600 line-clamp-2">{action.description}</p>
+                </Link>
+              ) : (
+                <button
+                  key={index}
+                  className="bg-white rounded-lg shadow-sm p-4 hover:shadow-md transition-all text-left active:scale-95"
+                >
+                  <div className={`w-10 h-10 ${action.color} rounded-lg flex items-center justify-center mb-3`}>
+                    <action.icon className="w-5 h-5 text-white" />
+                  </div>
+                  <h3 className="font-semibold text-gray-900 text-sm mb-1">{action.title}</h3>
+                  <p className="text-xs text-gray-600 line-clamp-2">{action.description}</p>
+                </button>
+              )
             ))}
           </div>
         </div>
@@ -275,18 +292,33 @@ export default function ResidencePortal() {
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50">
         <div className="grid grid-cols-5 h-16">
           {mobileMenuItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`flex flex-col items-center justify-center space-y-1 transition-colors ${
-                activeTab === item.id
-                  ? 'text-blue-600'
-                  : 'text-gray-400 hover:text-gray-600'
-              }`}
-            >
-              <item.icon className="w-5 h-5" />
-              <span className="text-xs font-medium">{item.label}</span>
-            </button>
+            item.id === 'qr' ? (
+              <Link
+                key={item.id}
+                href="/guests"
+                className={`flex flex-col items-center justify-center space-y-1 transition-colors ${
+                  activeTab === item.id
+                    ? 'text-blue-600'
+                    : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                <item.icon className="w-5 h-5" />
+                <span className="text-xs font-medium">{item.label}</span>
+              </Link>
+            ) : (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`flex flex-col items-center justify-center space-y-1 transition-colors ${
+                  activeTab === item.id
+                    ? 'text-blue-600'
+                    : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                <item.icon className="w-5 h-5" />
+                <span className="text-xs font-medium">{item.label}</span>
+              </button>
+            )
           ))}
         </div>
       </nav>

@@ -58,4 +58,24 @@ export const profileAPI = {
   getProfile: () => api.get('/api/user/profile'),
 }
 
+// Guests API
+export const guestsAPI = {
+  getGuests: (params?: string) =>
+    api.get(`/api/guests${params ? `?${params}` : ''}`),
+
+  getGuest: (id: string) => api.get(`/api/guests/${id}`),
+
+  createGuest: (guestData: any) => api.post('/api/guests', guestData),
+
+  updateGuest: (id: string, guestData: any) =>
+    api.put(`/api/guests/${id}`, guestData),
+
+  deleteGuest: (id: string) => api.delete(`/api/guests/${id}`),
+
+  checkInGuest: (id: string, accessData?: any) =>
+    api.post(`/api/guests/${id}/check-in`, accessData),
+
+  getGuestQRCode: (id: string) => api.get(`/api/guests/${id}/qr-code`),
+}
+
 export default api

@@ -1119,6 +1119,411 @@ async function startServer() {
       }
     });
 
+    // Guests Routes
+    app.get('/api/guests', authenticateToken, async (req, res) => {
+      try {
+        const { page = 1, limit = 10, search, status, householdId } = req.query;
+        const tenantId = req.user.tenantId;
+
+        let query = supabase
+          .from('guests')
+          .select(`
+            *,
+            households:household_id(name, contact_email),
+            users:host_id(first_name, last_name, email, phone)
+          `, { count: 'exact' })
+          .eq('tenant_id', tenantId);
+
+        if (search) {
+          query = query.or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%,phone.ilike.%${search}%`);
+        }
+
+        if (status) {
+          query = query.eq('status', status);
+        }
+
+        if (householdId) {
+          query = query.eq('household_id', householdId);
+        }
+
+        const { data, error, count } = await query
+          .range((page - 1) * limit, page * limit - 1)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('Guests error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch guests'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: data || [],
+          pagination: {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total: count || 0
+          }
+        });
+
+      } catch (error) {
+        console.error('Guests error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.post('/api/guests', authenticateToken, async (req, res) => {
+      try {
+        const {
+          householdId,
+          hostId,
+          firstName,
+          lastName,
+          email,
+          phone,
+          purpose,
+          visitType,
+          startDate,
+          endDate,
+          startTime,
+          endTime,
+          accessNotes,
+          vehicleInfo
+        } = req.body;
+
+        const tenantId = req.user.tenantId;
+
+        // Validate required fields
+        if (!householdId || !hostId || !firstName || !lastName || !purpose || !visitType || !startDate || !endDate) {
+          return res.status(400).json({
+            success: false,
+            message: 'Missing required fields'
+          });
+        }
+
+        // Generate unique QR code
+        const qrCode = `GUEST-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+
+        // Calculate visit duration
+        const startDateTime = new Date(`${startDate} ${startTime || '00:00'}`);
+        const endDateTime = new Date(`${endDate} ${endTime || '23:59'}`);
+        const duration = Math.ceil((endDateTime.getTime() - startDateTime.getTime()) / (1000 * 60 * 60 * 24));
+
+        // Create guest
+        const { data, error } = await supabase
+          .from('guests')
+          .insert([{
+            household_id: householdId,
+            host_id: hostId,
+            tenant_id: tenantId,
+            first_name: firstName,
+            last_name: lastName,
+            email,
+            phone,
+            purpose,
+            visit_type: visitType,
+            start_date: startDate,
+            end_date: endDate,
+            start_time: startTime || '00:00',
+            end_time: endTime || '23:59',
+            access_notes: accessNotes,
+            vehicle_info: vehicleInfo,
+            qr_code: qrCode,
+            status: 'active',
+            duration_days: duration,
+            access_count: 0,
+            created_at: new Date(),
+            updated_at: new Date()
+          }])
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Create guest error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to create guest'
+          });
+        }
+
+        res.status(201).json({
+          success: true,
+          data: data,
+          message: 'Guest registered successfully'
+        });
+
+      } catch (error) {
+        console.error('Create guest error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.put('/api/guests/:id', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const {
+          firstName,
+          lastName,
+          email,
+          phone,
+          purpose,
+          visitType,
+          startDate,
+          endDate,
+          startTime,
+          endTime,
+          accessNotes,
+          vehicleInfo,
+          status
+        } = req.body;
+
+        const tenantId = req.user.tenantId;
+
+        // Verify guest belongs to tenant
+        const { data: existing, error: checkError } = await supabase
+          .from('guests')
+          .select('*')
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .single();
+
+        if (checkError || !existing) {
+          return res.status(404).json({
+            success: false,
+            message: 'Guest not found'
+          });
+        }
+
+        const updateData = {
+          updated_at: new Date()
+        };
+
+        if (firstName) updateData.first_name = firstName;
+        if (lastName) updateData.last_name = lastName;
+        if (email !== undefined) updateData.email = email;
+        if (phone !== undefined) updateData.phone = phone;
+        if (purpose) updateData.purpose = purpose;
+        if (visitType) updateData.visit_type = visitType;
+        if (startDate) updateData.start_date = startDate;
+        if (endDate) updateData.end_date = endDate;
+        if (startTime) updateData.start_time = startTime;
+        if (endTime) updateData.end_time = endTime;
+        if (accessNotes !== undefined) updateData.access_notes = accessNotes;
+        if (vehicleInfo !== undefined) updateData.vehicle_info = vehicleInfo;
+        if (status) updateData.status = status;
+
+        const { data, error } = await supabase
+          .from('guests')
+          .update(updateData)
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Update guest error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to update guest'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: data,
+          message: 'Guest updated successfully'
+        });
+
+      } catch (error) {
+        console.error('Update guest error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.delete('/api/guests/:id', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const tenantId = req.user.tenantId;
+
+        // Verify guest belongs to tenant
+        const { data: existing, error: checkError } = await supabase
+          .from('guests')
+          .select('*')
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .single();
+
+        if (checkError || !existing) {
+          return res.status(404).json({
+            success: false,
+            message: 'Guest not found'
+          });
+        }
+
+        // Soft delete - deactivate guest
+        const { error } = await supabase
+          .from('guests')
+          .update({
+            status: 'cancelled',
+            updated_at: new Date()
+          })
+          .eq('id', id);
+
+        if (error) {
+          console.error('Delete guest error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to delete guest'
+          });
+        }
+
+        res.json({
+          success: true,
+          message: 'Guest deleted successfully'
+        });
+
+      } catch (error) {
+        console.error('Delete guest error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.post('/api/guests/:id/check-in', authenticateToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { accessPoint } = req.body;
+        const tenantId = req.user.tenantId;
+
+        // Verify guest belongs to tenant
+        const { data: guest, error: checkError } = await supabase
+          .from('guests')
+          .select('*')
+          .eq('id', id)
+          .eq('tenant_id', tenantId)
+          .single();
+
+        if (checkError || !guest) {
+          return res.status(404).json({
+            success: false,
+            message: 'Guest not found'
+          });
+        }
+
+        // Check if guest is still valid
+        const now = new Date();
+        const startDate = new Date(guest.start_date);
+        const endDate = new Date(guest.end_date);
+
+        if (now < startDate || now > endDate || guest.status !== 'active') {
+          return res.status(400).json({
+            success: false,
+            message: 'Guest access is not valid'
+          });
+        }
+
+        // Update access count and last access
+        const { data, error } = await supabase
+          .from('guests')
+          .update({
+            access_count: guest.access_count + 1,
+            last_access: new Date(),
+            last_access_point: accessPoint,
+            updated_at: new Date()
+          })
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (error) {
+          console.error('Check-in error:', error);
+          return res.status(500).json({
+            success: false,
+            message: 'Failed to check in guest'
+          });
+        }
+
+        res.json({
+          success: true,
+          data: data,
+          message: 'Guest checked in successfully'
+        });
+
+      } catch (error) {
+        console.error('Check-in error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
+    app.get('/api/guests/:id/qr-code', async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        // Get guest QR code without authentication (for scanning)
+        const { data: guest, error } = await supabase
+          .from('guests')
+          .select(`
+            id,
+            qr_code,
+            first_name,
+            last_name,
+            purpose,
+            visit_type,
+            start_date,
+            end_date,
+            status,
+            households:household_id(name),
+            users:host_id(first_name, last_name, phone)
+          `)
+          .eq('id', id)
+          .single();
+
+        if (error || !guest) {
+          return res.status(404).json({
+            success: false,
+            message: 'Guest not found'
+          });
+        }
+
+        // Check if QR code is still valid
+        const now = new Date();
+        const startDate = new Date(guest.start_date);
+        const endDate = new Date(guest.end_date);
+
+        const isValid = now >= startDate && now <= endDate && guest.status === 'active';
+
+        res.json({
+          success: true,
+          data: {
+            ...guest,
+            is_valid: isValid
+          }
+        });
+
+      } catch (error) {
+        console.error('QR code error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    });
+
     // Start server
     app.listen(PORT, () => {
       console.log(`🚀 HOA Community Platform API Server Started!`);
