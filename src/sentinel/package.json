@@ -1,23 +1,38 @@
 {
   "name": "sentinel",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "HOA Community Platform - Sentinel Security Portal",
+  "private": true,
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "@types/node": "^20.19.23",
-    "@types/react": "^18.3.26",
-    "@types/react-dom": "^18.3.7",
-    "eslint-config-next": "^15.5.6",
     "next": "^14.2.33",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@types/node": "^20.19.23",
+    "@types/react": "^18.3.26",
+    "@types/react-dom": "^18.3.7",
+    "tailwindcss": "^3.4.0",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "lucide-react": "^0.294.0",
+    "axios": "^1.6.0",
+    "react-hook-form": "^7.48.2",
+    "react-hot-toast": "^2.4.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.3.1",
+    "date-fns": "^2.30.0",
+    "@headlessui/react": "^1.7.17",
+    "react-qr-scanner": "^1.0.0-alpha.1",
+    "html5-qrcode": "^2.3.8"
+  },
+  "devDependencies": {
+    "eslint": "^8",
+    "eslint-config-next": "15.5.6"
   }
 }

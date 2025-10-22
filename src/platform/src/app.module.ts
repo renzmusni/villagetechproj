@@ -12,6 +12,12 @@ import { TenantsModule } from './modules/tenants/tenants.module';
 import { HouseholdsModule } from './modules/households/households.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { GatePassesModule } from './modules/gate-passes/gate-passes.module';
+import { GuestsModule } from './modules/guests/guests.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ConstructionPermitsModule } from './modules/construction-permits/construction-permits.module';
+import { AnnouncementsModule } from './modules/announcements/announcements.module';
+import { ElectionsModule } from './modules/elections/elections.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 
 @Module({
   imports: [
@@ -56,6 +62,12 @@ import { GatePassesModule } from './modules/gate-passes/gate-passes.module';
     HouseholdsModule,
     VehiclesModule,
     GatePassesModule,
+    GuestsModule,
+    NotificationsModule,
+    ConstructionPermitsModule,
+    AnnouncementsModule,
+    ElectionsModule,
+    PaymentsModule,
   ],
 })
 export class AppModule {

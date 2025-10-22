@@ -150,15 +150,38 @@ export interface AuditLog {
 }
 
 // Enums
-export type UserRole =
-  | 'super_admin'
-  | 'platform_admin'
-  | 'tenant_admin'
-  | 'admin_head'
-  | 'security_head'
-  | 'household_head'
-  | 'resident'
-  | 'security_officer';
+export enum UserRole {
+  SUPER_ADMIN = 'super_admin',
+  PLATFORM_ADMIN = 'platform_admin',
+  TENANT_ADMIN = 'tenant_admin',
+  ADMIN_HEAD = 'admin_head',
+  ADMIN_OFFICER = 'admin_officer',
+  SECURITY_HEAD = 'security_head',
+  SECURITY_OFFICER = 'security_officer',
+  HOUSEHOLD_HEAD = 'household_head',
+  HOUSEHOLD_MEMBER = 'household_member',
+  HOUSEHOLD_BENEFICIAL_USER = 'household_beneficial_user',
+  RESIDENT = 'resident',
+  BOARD_MEMBER = 'board_member'
+}
+
+export enum AnnouncementType {
+  GENERAL = 'general',
+  MAINTENANCE = 'maintenance',
+  EVENT = 'event',
+  SECURITY = 'security',
+  POLICY = 'policy',
+  EMERGENCY = 'emergency'
+}
+
+export enum AnnouncementAudience {
+  ALL = 'all',
+  RESIDENTS = 'residents',
+  BOARD_MEMBERS = 'board_members',
+  ADMIN_HEADS = 'admin_heads',
+  SECURITY_PERSONNEL = 'security_personnel',
+  SPECIFIC_HOUSEHOLDS = 'specific_households'
+}
 
 export type GatePassType = 'permanent' | 'temporary' | 'visitor' | 'delivery' | 'contractor';
 
@@ -193,6 +216,7 @@ export interface ApiResponse<T = any> {
   data?: T;
   message?: string;
   errors?: string[];
+  total?: number;
 }
 
 export interface PaginatedResponse<T = any> extends ApiResponse<T[]> {
@@ -209,7 +233,10 @@ export interface JwtPayload {
   sub: string;
   email: string;
   role: UserRole;
+  roles?: UserRole[];
   tenant_id?: string;
+  household_id?: string;
+  display_name?: string;
   iat?: number;
   exp?: number;
 }
